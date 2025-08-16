@@ -1,6 +1,35 @@
 # history+
 
-`history+` is a professional command-line utility that logs all executed commands and their outputs in real time.  
+`history+` is a professional command-line utility that logs all ex### Quick Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/vinothvbt/history-plus.git
+cd history-plus
+
+# Make scripts executable (required after cloning)
+chmod +x history+ install.sh test.sh
+
+# Install for current user only (recommended)
+./install.sh --user
+
+# OR install system-wide (requires sudo)
+sudo ./install.sh
+```
+
+### Alternative: Using Makefile
+
+```bash
+# Clone and install in one step
+git clone https://github.com/vinothvbt/history-plus.git
+cd history-plus
+
+# Install for current user (sets permissions automatically)
+make install-user
+
+# OR install system-wide
+make install
+```ds and their outputs in real time.  
 It is designed for **audit, debugging, and forensic analysis**.  
 
 Unlike the default shell history, `history+` captures both the **command input** and **its output**, while excluding sensitive commands for security.
@@ -59,18 +88,30 @@ You can add or remove commands (comma-separated) as needed.
 ---
 ## Features
 
+### Core Features
 - Start and stop logging sessions with simple commands.
 - Logs are stored with timestamps in `~/.history_plus/`.
 - Excludes sensitive commands (like `passwd`, `ssh`, `mysql`) from output logging.
 - Configurable exclusion list via `~/.history_plus/config`.
 - Auto-stops when the terminal is closed (EXIT, INT, HUP traps).
 - Self-aware: `history+` commands themselves are never logged.
-- Built-in commands:
-  - `history+ start` → Start logging session.
-  - `history+ stop` → Stop current session.
-  - `history+ status` → Show active session and log file path.
-  - `history+ tail` → Live view of active log file.
-  - `history+ list` → List all previous logging sessions.
+
+### Professional Features
+- **Log Rotation**: Automatic size-based rotation and manual rotation commands
+- **Log Management**: Clean up old logs by age or size with `--dry-run` support
+- **Export Capabilities**: Convert logs to JSON or CSV for analysis and automation
+- **Size Monitoring**: Warns when logs exceed configurable size limits
+- **Advanced Cleanup**: Powerful filtering by age, size, with confirmation prompts
+
+### Built-in Commands
+- `history+ start` → Start logging session.
+- `history+ stop` → Stop current session.
+- `history+ status` → Show active session and log file path.
+- `history+ tail` → Live view of active log file.
+- `history+ list` → List all previous logging sessions.
+- `history+ rotate` → Rotate current log (start fresh session).
+- `history+ cleanup [options]` → Clean up old logs with filters.
+- `history+ export [options] file` → Export logs to JSON/CSV formats.
 
 ---
 
@@ -139,6 +180,53 @@ history+ tail
 List sessions:
 ```bash
 history+ list
+```
+
+Rotate logs:
+```bash
+history+ rotate
+```
+
+Clean up old logs:
+```bash
+history+ cleanup --older-than 30d --dry-run
+```
+
+Export to JSON/CSV:
+```bash
+history+ export --format json session.log
+history+ export --format csv session.log output.csv
+```
+
+---
+
+## Advanced Usage
+
+### Automated Log Management
+```bash
+# Set up automated cleanup (add to crontab)
+0 2 * * * /usr/local/bin/history+ cleanup --older-than 30d
+
+# Size-based cleanup
+history+ cleanup --larger-than 100M --dry-run
+```
+
+### Export for Analysis
+```bash
+# Export to JSON for scripting/automation
+history+ export --format json session.log | jq '.session.entries[].command'
+
+# Export to CSV for spreadsheet analysis
+history+ export --format csv session.log
+```
+
+### Log Rotation Strategies
+```bash
+# Manual rotation when logs get large
+history+ rotate
+
+# Check current session size
+history+ status
 ```
 
 ---

@@ -12,6 +12,11 @@ readonly CONFIG_FILE="$CONFIG_DIR/config"
 readonly PID_FILE="$CONFIG_DIR/history_plus.pid"
 readonly LOG_DIR="$CONFIG_DIR/logs"
 
+# Professional logging configuration
+readonly MAX_LOG_SIZE_MB=100  # Auto-rotate when log exceeds this size
+readonly MAX_LOG_AGE_DAYS=90  # Default cleanup age
+readonly JSON_LOG_DIR="$CONFIG_DIR/json_logs"  # JSON format logs
+
 # Default excluded commands (can be overridden by config file)
 readonly DEFAULT_EXCLUDES="passwd,ssh,mysql,sudo,ftp,history+"
 
@@ -45,19 +50,26 @@ show_usage() {
 Usage: $SCRIPT_NAME <command>
 
 Commands:
-  start     Start logging session
+  start     Start logging session [--json] [--keywords file]
   stop      Stop current logging session
   status    Show current session status
-  tail      Live view of current log file
+  tail      Live view of current log file [--json]
   list      List all previous logging sessions
+  rotate    Rotate current log (start new session)
+  cleanup   Clean up old logs (with size/age filters)
+  export    Export logs to different formats
   help      Show this help message
 
 Examples:
   $SCRIPT_NAME start    # Begin logging commands and outputs
+  $SCRIPT_NAME start --json  # Log in JSON format for parsing
   $SCRIPT_NAME stop     # End current session
   $SCRIPT_NAME status   # Check if logging is active
   $SCRIPT_NAME tail     # Watch log file in real-time
   $SCRIPT_NAME list     # Show all previous sessions
+  $SCRIPT_NAME rotate   # Start new log file (auto-rotate)
+  $SCRIPT_NAME cleanup --older-than 30d  # Remove logs older than 30 days
+  $SCRIPT_NAME export --format json session.log  # Convert to JSON
 
 Configuration:
   Config directory: $CONFIG_DIR
@@ -150,6 +162,15 @@ get_current_log_file() {
 # Start logging session
 start_session() {
     if is_session_active; then
+        local current_log
+        current_log=$(get_current_log_file)
+        
+        # Check if current log needs rotation due to size
+        if [[ -n "$current_log" ]] && check_log_rotation "$current_log"; then
+            print_warning "Current log file is large (>${MAX_LOG_SIZE_MB}MB)"
+            print_info "Consider using '$SCRIPT_NAME rotate' to start a fresh log"
+        fi
+        
         print_warning "Logging session is already active (PID: $(cat "$PID_FILE"))"
         return 1
     fi
@@ -371,6 +392,351 @@ list_sessions() {
     fi
 }
 
+# Rotate current log (start new session file)
+rotate_log() {
+    if ! is_session_active; then
+        print_warning "No active logging session to rotate"
+        print_info "Use '$SCRIPT_NAME start' to begin a new session"
+        return 1
+    fi
+    
+    local current_log
+    current_log=$(get_current_log_file)
+    
+    if [[ -z "$current_log" ]]; then
+        print_error "Could not determine current log file"
+        return 1
+    fi
+    
+    print_info "Rotating log file..."
+    print_info "Current log: $current_log"
+    
+    # Stop current session
+    stop_session
+    
+    # Wait a moment for cleanup
+    sleep 1
+    
+    # Start new session
+    print_info "Starting new logging session..."
+    start_session
+}
+
+# Check if log file needs rotation (size-based)
+check_log_rotation() {
+    local log_file="$1"
+    [[ ! -f "$log_file" ]] && return 1
+    
+    # Get file size in MB
+    local size_mb
+    size_mb=$(du -m "$log_file" 2>/dev/null | cut -f1 || echo "0")
+    
+    [[ $size_mb -ge $MAX_LOG_SIZE_MB ]]
+}
+
+# Clean up old logs
+cleanup_logs() {
+    local days="$MAX_LOG_AGE_DAYS"
+    local size_limit=""
+    local dry_run=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --older-than)
+                days="$2"
+                # Remove 'd' suffix if present
+                days="${days%d}"
+                shift 2
+                ;;
+            --larger-than)
+                size_limit="$2"
+                shift 2
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --help)
+                cat << EOF
+Usage: $SCRIPT_NAME cleanup [OPTIONS]
+
+Options:
+  --older-than DAYS    Remove logs older than DAYS (default: $MAX_LOG_AGE_DAYS)
+  --larger-than SIZE   Remove logs larger than SIZE (e.g., 100M, 1G)
+  --dry-run           Show what would be deleted without deleting
+  --help              Show this help
+
+Examples:
+  $SCRIPT_NAME cleanup --older-than 30d
+  $SCRIPT_NAME cleanup --larger-than 100M --dry-run
+EOF
+                return 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if [[ ! -d "$LOG_DIR" ]]; then
+        print_info "No log directory found"
+        return 0
+    fi
+    
+    print_info "Cleaning up logs older than $days days..."
+    
+    local deleted_count=0
+    local deleted_size=0
+    
+    # Find and process old files
+    while IFS= read -r -d '' file; do
+        local file_age file_size_mb action
+        file_age=$(find "$file" -mtime +$days -print 2>/dev/null)
+        file_size_mb=$(du -m "$file" 2>/dev/null | cut -f1 || echo "0")
+        
+        # Check age condition
+        local should_delete=false
+        if [[ -n "$file_age" ]]; then
+            should_delete=true
+            action="age > ${days}d"
+        fi
+        
+        # Check size condition if specified
+        if [[ -n "$size_limit" && "$should_delete" == false ]]; then
+            local limit_mb
+            case "$size_limit" in
+                *M) limit_mb="${size_limit%M}" ;;
+                *G) limit_mb=$((${size_limit%G} * 1024)) ;;
+                *) limit_mb="$size_limit" ;;
+            esac
+            
+            if [[ $file_size_mb -gt $limit_mb ]]; then
+                should_delete=true
+                action="size > $size_limit"
+            fi
+        fi
+        
+        if [[ "$should_delete" == true ]]; then
+            if $dry_run; then
+                echo "Would delete: $(basename "$file") (${file_size_mb}MB, $action)"
+            else
+                if rm "$file" 2>/dev/null; then
+                    echo "Deleted: $(basename "$file") (${file_size_mb}MB, $action)"
+                    ((deleted_count++))
+                    ((deleted_size += file_size_mb))
+                else
+                    print_warning "Failed to delete: $file"
+                fi
+            fi
+        fi
+    done < <(find "$LOG_DIR" -name "history_plus_*.log" -type f -print0 2>/dev/null)
+    
+    if $dry_run; then
+        print_info "Dry run completed"
+    else
+        if [[ $deleted_count -gt 0 ]]; then
+            print_success "Cleaned up $deleted_count files (${deleted_size}MB total)"
+        else
+            print_info "No files met cleanup criteria"
+        fi
+    fi
+}
+
+# Export logs to different formats
+export_logs() {
+    local format="json"
+    local input_file=""
+    local output_file=""
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --format)
+                format="$2"
+                shift 2
+                ;;
+            --help)
+                cat << EOF
+Usage: $SCRIPT_NAME export [OPTIONS] INPUT_FILE [OUTPUT_FILE]
+
+Options:
+  --format FORMAT     Output format: json, csv (default: json)
+  --help             Show this help
+
+Examples:
+  $SCRIPT_NAME export --format json session.log
+  $SCRIPT_NAME export --format csv session.log output.csv
+EOF
+                return 0
+                ;;
+            *)
+                if [[ -z "$input_file" ]]; then
+                    input_file="$1"
+                else
+                    output_file="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    if [[ -z "$input_file" ]]; then
+        print_error "Input file required"
+        return 1
+    fi
+    
+    if [[ ! -f "$input_file" ]]; then
+        print_error "Input file not found: $input_file"
+        return 1
+    fi
+    
+    # Default output file
+    if [[ -z "$output_file" ]]; then
+        output_file="${input_file%.*}.$format"
+    fi
+    
+    case "$format" in
+        json)
+            export_to_json "$input_file" "$output_file"
+            ;;
+        csv)
+            export_to_csv "$input_file" "$output_file"
+            ;;
+        *)
+            print_error "Unsupported format: $format (supported: json, csv)"
+            return 1
+            ;;
+    esac
+}
+
+# Export to JSON format
+export_to_json() {
+    local input="$1"
+    local output="$2"
+    
+    # Check if jq is available for proper JSON escaping
+    if ! command -v jq >/dev/null 2>&1; then
+        print_error "jq is required for JSON export. Install with: apt install jq"
+        return 1
+    fi
+    
+    print_info "Converting $input to JSON format..."
+    
+    {
+        echo "{"
+        echo "  \"session\": {"
+        echo "    \"exported_at\": \"$(date -Iseconds)\","
+        echo "    \"source_file\": \"$input\","
+        echo "    \"entries\": ["
+        
+        local first=true
+        local current_timestamp=""
+        local current_command=""
+        local current_output=""
+        local in_output=false
+        
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\[([0-9-]+\ [0-9:]+)\]$ ]]; then
+                # New timestamp - output previous entry if exists
+                if [[ -n "$current_timestamp" ]]; then
+                    if $first; then
+                        first=false
+                    else
+                        echo ","
+                    fi
+                    echo "      {"
+                    echo "        \"timestamp\": \"$current_timestamp\","
+                    echo "        \"command\": $(printf '%s' "$current_command" | jq -R .),"
+                    echo "        \"output\": $(printf '%s' "$current_output" | jq -R .)"
+                    echo "      }"
+                fi
+                current_timestamp="${BASH_REMATCH[1]}"
+                current_command=""
+                current_output=""
+                in_output=false
+            elif [[ "$line" =~ ^Command:\ (.*)$ ]]; then
+                current_command="${BASH_REMATCH[1]}"
+            elif [[ "$line" == "Output:" ]]; then
+                in_output=true
+            elif [[ "$line" == "---" ]]; then
+                in_output=false
+            elif $in_output; then
+                current_output+="$line"$'\n'
+            fi
+        done < "$input"
+        
+        # Output final entry
+        if [[ -n "$current_timestamp" ]]; then
+            if ! $first; then
+                echo ","
+            fi
+            echo "      {"
+            echo "        \"timestamp\": \"$current_timestamp\","
+            echo "        \"command\": $(printf '%s' "$current_command" | jq -R .),"
+            echo "        \"output\": $(printf '%s' "$current_output" | jq -R .)"
+            echo "      }"
+        fi
+        
+        echo "    ]"
+        echo "  }"
+        echo "}"
+    } > "$output"
+    
+    print_success "JSON export completed: $output"
+}
+
+# Export to CSV format  
+export_to_csv() {
+    local input="$1"
+    local output="$2"
+    
+    print_info "Converting $input to CSV format..."
+    
+    {
+        echo "timestamp,command,output_length,duration_seconds"
+        
+        local current_timestamp=""
+        local current_command=""
+        local current_output=""
+        local in_output=false
+        
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\[([0-9-]+\ [0-9:]+)\]$ ]]; then
+                # Output previous entry if exists
+                if [[ -n "$current_timestamp" ]]; then
+                    local output_len=${#current_output}
+                    # Escape quotes in CSV data
+                    local escaped_cmd="${current_command//\"/\"\"}"
+                    echo "\"$current_timestamp\",\"$escaped_cmd\",\"$output_len\",\"0\""
+                fi
+                current_timestamp="${BASH_REMATCH[1]}"
+                current_command=""
+                current_output=""
+                in_output=false
+            elif [[ "$line" =~ ^Command:\ (.*)$ ]]; then
+                current_command="${BASH_REMATCH[1]}"
+            elif [[ "$line" == "Output:" ]]; then
+                in_output=true
+            elif [[ "$line" == "---" ]]; then
+                in_output=false
+            elif $in_output; then
+                current_output+="$line"$'\n'
+            fi
+        done < "$input"
+        
+        # Output final entry
+        if [[ -n "$current_timestamp" ]]; then
+            local output_len=${#current_output}
+            local escaped_cmd="${current_command//\"/\"\"}"
+            echo "\"$current_timestamp\",\"$escaped_cmd\",\"$output_len\",\"0\""
+        fi
+    } > "$output"
+    
+    print_success "CSV export completed: $output"
+}
+
 # Main function
 main() {
     case "${1:-}" in
@@ -388,6 +754,17 @@ main() {
             ;;
         list)
             list_sessions
+            ;;
+        rotate)
+            rotate_log
+            ;;
+        cleanup)
+            shift  # Remove 'cleanup' from arguments
+            cleanup_logs "$@"
+            ;;
+        export)
+            shift  # Remove 'export' from arguments
+            export_logs "$@"
             ;;
         help|--help|-h)
             show_usage
