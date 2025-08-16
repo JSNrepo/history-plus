@@ -1,0 +1,1 @@
+passwd,ssh,mysql,sudo,ftp,scp,rsync,gpg,openssl,curl -u,wget --user
