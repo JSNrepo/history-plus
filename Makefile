@@ -85,10 +85,17 @@ demo: permissions
 	@echo "1. Testing help system..."
 	@./history+ help | head -5
 	@echo ""
-	@echo "2. Testing export help..."
+	@echo "2. Testing security model..."
+	@chmod +x demo_security.sh
+	@./demo_security.sh | head -15
+	@echo ""
+	@echo "3. Testing export help..."
 	@./history+ export --help | head -5
 	@echo ""
-	@echo "3. Testing cleanup help..."
-	@./history+ cleanup --help | head -5
-	@echo ""
 	@echo "Demo completed! Use 'make install-user' to install."
+
+# Demo security features
+demo-security: permissions
+	@echo "Running security model demonstration..."
+	@chmod +x demo_security.sh
+	@./demo_security.sh

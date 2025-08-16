@@ -1,159 +1,233 @@
 # history+
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+`history+` is a professional command-line utility that logs all ex### Quick Installation
 
-**history+** is a professional command-line utility for advanced shell command auditing. It logs every command and its output in real time, making it indispensable for audit, debugging, and forensic analysis. Unlike default shell history, history+ captures both command input and output, while excluding sensitive commands for security.
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Why Use history+?](#why-use-history)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Advanced Usage](#advanced-usage)
-- [Example Log Entry](#example-log-entry)
-- [Security Notes](#security-notes)
-- [Development](#development)
-- [Support & Contributing](#support--contributing)
-- [License](#license)
-
----
-
-## Features
-
-**Core Features**
-- Start/stop logging sessions with a single command.
-- Logs every command and output with timestamps (`~/.history_plus/`).
-- Excludes sensitive commands from output logging (configurable).
-- Auto-stops on terminal exit.
-- Self-aware: `history+` commands themselves are never logged.
-
-**Professional Features**
-- Log rotation (auto/manual).
-- Log management: clean up old logs by age or size.
-- Flexible export: JSON, CSV.
-- Size monitoring and warnings.
-- Powerful cleanup with confirmation prompts.
-
-**Built-in Commands**
-- `history+ start` / `history+ stop` / `history+ status`
-- `history+ tail` / `history+ list` / `history+ rotate`
-- `history+ cleanup [options]` / `history+ export [options] file`
-
----
-
-## Why Use history+?
-
-- **Comprehensive Auditing:** Full traceability of all shell activity.
-- **Debugging Made Easy:** Review exact command outputs.
-- **Forensic Analysis:** Tamper-resistant logs for compliance/investigations.
-- **Privacy Controls:** Exclude sensitive commands to protect credentials.
-
----
-
-## Installation
-
-### Quick Install (Recommended)
-
-```
+```bash
+# Clone the repository
 git clone https://github.com/vinothvbt/history-plus.git
 cd history-plus
+
+# Make scripts executable (required after cloning)
 chmod +x history+ install.sh test.sh
-./install.sh --user       # For current user
-# OR for system-wide
+
+# Install for current user only (recommended)
+./install.sh --user
+
+# OR install system-wide (requires sudo)
 sudo ./install.sh
 ```
 
-### Using Makefile
+### Alternative: Using Makefile
 
-```
+```bash
+# Clone and install in one step
 git clone https://github.com/vinothvbt/history-plus.git
 cd history-plus
-make install-user          # For current user
-# OR
-make install               # System-wide
-```
 
-### Manual Install
+# Install for current user (sets permissions automatically)
+make install-user
 
-1. Clone/download repository.
-2. Make the script executable and copy to your PATH:
-    ```
-    chmod +x history+
-    sudo cp history+ /usr/local/bin/
-    ```
-3. Create configuration directory:
-    ```
-    mkdir -p ~/.history_plus
-    ```
-4. (Optional) Add a config file:
-    ```
-    cp config.example ~/.history_plus/config
-    ```
+# OR install system-wide
+make install
+```ds and their outputs in real time.  
+It is designed for **audit, debugging, and forensic analysis**.  
+
+Unlike the default shell history, `history+` captures both the **command input** and **its output**, while excluding sensitive commands for security.
+
+---
+## Why Use history+?
+
+- **Comprehensive Auditing:** Capture every command and its output for full traceability.
+- **Debugging Made Easy:** Review exact command outputs to troubleshoot issues.
+- **Forensic Analysis:** Maintain a tamper-resistant log for compliance and investigations.
+- **Privacy Controls:** Exclude sensitive commands from logs to protect credentials and private data.
 
 ---
 
 ## Quick Start
 
-```
-history+ start   # Start logging
-# ...your commands...
-history+ stop    # Stop logging
-history+ status  # Check current logging status
-history+ tail    # View latest log entries
-history+ list    # List previous sessions
+```bash
+# Start logging your shell session
+history+ start
+
+# Run your commands as usual...
+
+# Stop logging when done
+history+ stop
+
+# Check current logging status
+history+ status
+
+# View the latest log entries in real time
+history+ tail
+
+# List all previous logging sessions
+history+ list
 ```
 
 ---
 
-## Configuration
+## Sample Configuration
 
-Customize command exclusions by editing `~/.history_plus/config`:
+Create or edit `~/.history_plus/config` to customize which commands are excluded from output logging:
 
-```
+```text
 passwd,ssh,mysql,sudo,ftp
 ```
 
-Add or remove commands as comma-separated values.
+You can add or remove commands (comma-separated) as needed.
+
+---
+
+## Support
+
+- **Bugs or Feature Requests:** Open an issue on the repository.
+- **Contributions:** Pull requests are welcome!
+- **Questions:** Contact the maintainer via GitHub.
+
+---
+## Features
+
+### Core Features
+- Start and stop logging sessions with simple commands.
+- Logs are stored with timestamps in `~/.history_plus/`.
+- Excludes sensitive commands (like `passwd`, `ssh`, `mysql`) from output logging.
+- Configurable exclusion list via `~/.history_plus/config`.
+- Auto-stops when the terminal is closed (EXIT, INT, HUP traps).
+- Self-aware: `history+` commands themselves are never logged.
+
+### Professional Features
+- **Log Rotation**: Automatic size-based rotation and manual rotation commands
+- **Log Management**: Clean up old logs by age or size with `--dry-run` support
+- **Export Capabilities**: Convert logs to JSON or CSV for analysis and automation
+- **Size Monitoring**: Warns when logs exceed configurable size limits
+- **Advanced Cleanup**: Powerful filtering by age, size, with confirmation prompts
+
+### Built-in Commands
+- `history+ start` → Start logging session.
+- `history+ stop` → Stop current session.
+- `history+ status` → Show active session and log file path.
+- `history+ tail` → Live view of active log file.
+- `history+ list` → List all previous logging sessions.
+- `history+ rotate` → Rotate current log (start fresh session).
+- `history+ cleanup [options]` → Clean up old logs with filters.
+- `history+ export [options] file` → Export logs to JSON/CSV formats.
+
+---
+
+## Installation
+
+### Quick Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/vinothvbt/history-plus.git
+cd history-plus
+
+# Install for current user only (recommended)
+./install.sh --user
+
+# OR install system-wide (requires sudo)
+sudo ./install.sh
+```
+
+### Manual Installation
+
+1. Download or clone this repository
+2. Make the script executable and copy to your PATH:
+
+   ```bash
+   chmod +x history+
+   sudo cp history+ /usr/local/bin/
+   ```
+
+3. Create configuration directory:
+
+   ```bash
+   mkdir -p ~/.history_plus
+   ```
+
+4. (Optional) Add a config file to define excluded commands:
+
+   ```bash
+   cp config.example ~/.history_plus/config
+   ```
 
 ---
 
 ## Usage
 
-- **Start Logging:** `history+ start`
-- **Stop Logging:** `history+ stop`
-- **Check Status:** `history+ status`
-- **Live View:** `history+ tail`
-- **List Sessions:** `history+ list`
-- **Rotate Logs:** `history+ rotate`
-- **Cleanup Old Logs:** `history+ cleanup --older-than 30d --dry-run`
-- **Export:**  
-    ```
+Start logging:
+```bash
+history+ start
+```
+
+Stop logging:
+```bash
+history+ stop
+```
+
+Check status:
+```bash
+history+ status
+```
+
+Live view:
+```bash
+history+ tail
+```
+
+List sessions:
+```bash
+history+ list
+```
+
+Rotate logs:
+```bash
+history+ rotate
+```
+
+Clean up old logs:
+```bash
+history+ cleanup --older-than 30d --dry-run
+```
+
+Export to JSON/CSV:
+```bash
 history+ export --format json session.log
 history+ export --format csv session.log output.csv
-    ```
+```
 
 ---
 
 ## Advanced Usage
 
-- **Automated Log Management (via crontab):**
-    ```
-    0 2 * * * /usr/local/bin/history+ cleanup --older-than 30d
-    ```
-- **Size-based Cleanup:**
-    ```
+### Automated Log Management
+```bash
+# Set up automated cleanup (add to crontab)
+0 2 * * * /usr/local/bin/history+ cleanup --older-than 30d
+
+# Size-based cleanup
 history+ cleanup --larger-than 100M --dry-run
-    ```
-- **Export for Scripting/Analysis:**
-    ```
+```
+
+### Export for Analysis
+```bash
+# Export to JSON for scripting/automation
 history+ export --format json session.log | jq '.session.entries[].command'
+
+# Export to CSV for spreadsheet analysis
 history+ export --format csv session.log
-    ```
+```
+
+### Log Rotation Strategies
+```bash
+# Manual rotation when logs get large
+history+ rotate
+
+# Check current session size
+history+ status
+```
 
 ---
 
@@ -174,25 +248,56 @@ drwxr-xr-x 18 user user 4096 Aug 16 19:00 ..
 
 ## Security Notes
 
-- Sensitive commands are excluded from output logging, based on your config file.
-- Default exclusions: `passwd`, `ssh`, `mysql`, `sudo`, `ftp`.
-- Edit `~/.history_plus/config` to control exclusions.
+- **Never Logged Commands**: Critical commands (`passwd`, `su`, `login`, `ssh-keygen`) are never logged at all
+- **Smart Password Filtering**: Commands like `sudo`, `gpg`, `openssl` log both command and output, but filter out password prompts
+- **Configurable Exclusions**: Additional commands can be excluded via `~/.history_plus/config`
+- **Password Detection**: Commands with password flags (`-p`, `--password`, etc.) are automatically excluded
+- **Secure Storage**: Configuration directory has restricted permissions (700)
+- **Security Audit**: Use `history+ security` to check your configuration for security issues
+
+### Security Model
+```
+passwd, su, login, ssh-keygen    → Never logged (complete exclusion)
+sudo, gpg, openssl              → Smart filtering (command + output, password prompts filtered)
+Other commands                  → Fully logged (command + output)
+```
+
+**Key Feature**: `sudo nmap` logs the command AND the scan results, but filters out the password prompt when sudo asks for authentication.
+
+### Example: sudo nmap Logging
+```
+[2025-08-16 15:30:01]
+Command: sudo nmap -sS target.com
+Output:
+[PASSWORD PROMPT FILTERED]
+Starting Nmap 7.80 ( https://nmap.org )
+Nmap scan report for target.com (192.168.1.1)
+Host is up (0.001s latency).
+PORT     STATE SERVICE
+22/tcp   open  ssh
+80/tcp   open  http
+443/tcp  open  https
+---
+```
 
 ---
 
 ## Development
 
-- **Run Tests:** `make test`
-- **Install for Dev:** `make install-user`
-- **Lint:** `make lint`
+Run tests:
+```bash
+make test
+```
 
----
+Install for development:
+```bash
+make install-user
+```
 
-## Support & Contributing
-
-- **Bug Reports & Feature Requests:** [Open an issue](https://github.com/vinothvbt/history-plus/issues).
-- **Contributions:** Pull requests are welcome!
-- **Questions:** Contact the maintainer via GitHub.
+Lint code:
+```bash
+make lint
+```
 
 ---
 

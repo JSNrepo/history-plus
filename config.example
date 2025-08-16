@@ -1,1 +1,32 @@
-passwd,ssh,mysql,sudo,ftp,scp,rsync,gpg,openssl,curl -u,wget --user
+# history+ security configuration
+# 
+# SECURITY WARNING: Some commands are ALWAYS excluded for security (hardcoded):
+# passwd, sudo, su, login, ssh-keygen, gpg, openssl
+# 
+# Additional commands to exclude from output logging:
+# History+ Configuration
+# Commands listed below will have their output hidden from logs
+# 
+# Security Model:
+# - Critical commands (passwd, su, login, ssh-keygen) are NEVER logged
+# - Password commands (sudo, gpg, openssl) log command but exclude output
+# - Commands below are user-configurable additional exclusions
+
+# Network commands
+ssh
+ftp
+scp
+rsync
+
+# Database commands  
+mysql
+psql
+sqlite3
+
+# Additional sensitive commands
+aws
+gcloud
+kubectl
+
+# Note: sudo is automatically handled - command logged, password protected
+# Note: passwd/su/login are never logged regardless of this config,scp,rsync,gpg,openssl,curl -u,wget --user,psql -W

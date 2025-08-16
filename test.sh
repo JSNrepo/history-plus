@@ -105,6 +105,19 @@ test_list_command() {
     fi
 }
 
+# Test security audit command
+test_security_audit() {
+    print_info "Testing security audit command"
+    
+    if ./history+ security >/dev/null 2>&1; then
+        print_success "Security audit command works"
+        return 0
+    else
+        print_error "Security audit command failed"
+        return 1
+    fi
+}
+
 # Test ShellCheck (if available)
 test_shellcheck() {
     print_info "Running ShellCheck if available"
@@ -139,6 +152,7 @@ run_tests() {
         "test_invalid_command"
         "test_config_creation"
         "test_list_command"
+        "test_security_audit"
         "test_shellcheck"
     )
     

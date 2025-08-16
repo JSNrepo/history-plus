@@ -18,7 +18,14 @@ readonly MAX_LOG_AGE_DAYS=90  # Default cleanup age
 readonly JSON_LOG_DIR="$CONFIG_DIR/json_logs"  # JSON format logs
 
 # Default excluded commands (can be overridden by config file)
-readonly DEFAULT_EXCLUDES="passwd,ssh,mysql,sudo,ftp,history+"
+readonly DEFAULT_EXCLUDES="ssh,mysql,ftp,history+"
+
+# Hardcoded security-critical commands that should never be logged
+# These cannot be overridden by user configuration
+readonly SECURITY_CRITICAL_COMMANDS="passwd,su,login,ssh-keygen"
+
+# Commands that should log the command but not capture interactive password input
+readonly PASSWORD_INPUT_COMMANDS="sudo,gpg,openssl"
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -58,6 +65,7 @@ Commands:
   rotate    Rotate current log (start new session)
   cleanup   Clean up old logs (with size/age filters)
   export    Export logs to different formats
+  security  Check configuration for security issues
   help      Show this help message
 
 Examples:
@@ -99,6 +107,55 @@ init_config() {
     
     # Secure the directory
     chmod 700 "$CONFIG_DIR"
+    
+    # Validate configuration for security issues
+    validate_security_config
+}
+
+# Validate configuration for potential security issues
+validate_security_config() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        return 0
+    fi
+    
+    local config_content
+    config_content=$(cat "$CONFIG_FILE")
+    
+    # Check for critical security commands that might be missing (these are never logged)
+    local critical_missing=()
+    IFS=',' read -ra critical_commands <<< "$SECURITY_CRITICAL_COMMANDS"
+    
+    for cmd in "${critical_commands[@]}"; do
+        cmd=$(echo "$cmd" | tr -d ' ')
+        if [[ ! "$config_content" =~ $cmd ]]; then
+            critical_missing+=("$cmd")
+        fi
+    done
+    
+    if [[ ${#critical_missing[@]} -gt 0 ]]; then
+        print_warning "Security Notice: Some critical commands are not in your exclusion config:"
+        printf "  Missing: %s\n" "${critical_missing[@]}"
+        print_info "These commands are still protected by hardcoded security rules (never logged)."
+        echo
+    fi
+    
+    # Check for password input commands (these log command but not output)
+    local password_missing=()
+    IFS=',' read -ra password_commands <<< "$PASSWORD_INPUT_COMMANDS"
+    
+    for cmd in "${password_commands[@]}"; do
+        cmd=$(echo "$cmd" | tr -d ' ')
+        if [[ ! "$config_content" =~ $cmd ]]; then
+            password_missing+=("$cmd")
+        fi
+    done
+    
+    if [[ ${#password_missing[@]} -gt 0 ]]; then
+        print_info "Smart password filtering commands (command + output logged, password prompts filtered):"
+        printf "  Protected: %s\n" "${password_missing[@]}"
+        print_info "These commands log both command and output but filter password prompts."
+        echo
+    fi
 }
 
 # Get current timestamp
@@ -125,22 +182,53 @@ get_excluded_commands() {
 # Check if a command should be excluded
 is_excluded_command() {
     local cmd="$1"
-    local excluded_commands
-    excluded_commands=$(get_excluded_commands)
+    local base_cmd=$(echo "$cmd" | awk '{print $1}')
     
     # Always exclude history+ itself
     if [[ "$cmd" == "history+" || "$cmd" =~ ^history\+.* ]]; then
         return 0
     fi
     
-    # Check against user-defined exclusions
+    # Check hardcoded security-critical commands (never logged at all)
+    IFS=',' read -ra CRITICAL_CMDS <<< "$SECURITY_CRITICAL_COMMANDS"
+    for critical_cmd in "${CRITICAL_CMDS[@]}"; do
+        critical_cmd=$(echo "$critical_cmd" | tr -d ' ')
+        if [[ "$base_cmd" == "$critical_cmd" ]]; then
+            return 0  # Exclude completely
+        fi
+    done
+    
+    # Check commands with password flags
+    if [[ "$cmd" =~ -p[[:space:]]|--password[[:space:]]|--pass[[:space:]]|--pwd[[:space:]]|--secret[[:space:]]|--token[[:space:]]|--key[[:space:]]|--auth[[:space:]] ]]; then
+        return 0  # Exclude completely
+    fi
+    
+    # Check user-configured exclusions
+    local excluded_commands
+    excluded_commands=$(get_excluded_commands)
     while IFS= read -r excluded; do
         if [[ -n "$excluded" && "$cmd" =~ ^$excluded ]]; then
             return 0
         fi
     done <<< "$excluded_commands"
     
-    return 1
+    return 1  # Don't exclude
+}
+
+# Check if command should have limited output logging (command logged, but not interactive input)
+is_password_input_command() {
+    local cmd="$1"
+    local base_cmd=$(echo "$cmd" | awk '{print $1}')
+    
+    IFS=',' read -ra PASSWORD_CMDS <<< "$PASSWORD_INPUT_COMMANDS"
+    for password_cmd in "${PASSWORD_CMDS[@]}"; do
+        password_cmd=$(echo "$password_cmd" | tr -d ' ')
+        if [[ "$base_cmd" == "$password_cmd" ]]; then
+            return 0  # Limited logging
+        fi
+    done
+    
+    return 1  # Normal logging
 }
 
 # Check if logging session is active
@@ -217,12 +305,8 @@ log_command() {
     # Skip empty commands
     [[ -z "$cmd" || "$cmd" =~ ^[[:space:]]*$ ]] && return
     
-    # Check if command should be excluded
-    local base_cmd
-    base_cmd=$(echo "$cmd" | awk '{print $1}')
-    
-    # Simple exclusion check (this will be enhanced in the main script)
-    if [[ "$base_cmd" =~ ^(passwd|ssh|mysql|sudo|ftp|history\+) ]]; then
+    # Check if command should be completely excluded
+    if is_excluded_command "$cmd"; then
         echo "[$timestamp]" >> "$HISTPLUS_LOG_FILE"
         echo "Command: $cmd" >> "$HISTPLUS_LOG_FILE"
         echo "Output: [EXCLUDED - SENSITIVE COMMAND]" >> "$HISTPLUS_LOG_FILE"
@@ -230,7 +314,32 @@ log_command() {
         return
     fi
     
-    # Log the command and capture output
+    # Check if this is a password input command (log command AND output, but filter password prompts)
+    if is_password_input_command "$cmd"; then
+        echo "[$timestamp]" >> "$HISTPLUS_LOG_FILE"
+        echo "Command: $cmd" >> "$HISTPLUS_LOG_FILE"
+        echo "Output:" >> "$HISTPLUS_LOG_FILE"
+        
+        # Execute command and filter password prompts from output
+        eval "$cmd" 2>&1 | while IFS= read -r line; do
+            # Filter out password prompts but keep everything else
+            if [[ ! "$line" =~ (\[sudo\]\ password|Password:|Enter\ password|password\ for) ]]; then
+                echo "$line" | tee -a "$HISTPLUS_LOG_FILE"
+            else
+                echo "[PASSWORD PROMPT FILTERED]" >> "$HISTPLUS_LOG_FILE"
+            fi
+        done
+        
+        # Capture exit code
+        local exit_code=${PIPESTATUS[0]}
+        if [[ $exit_code -ne 0 ]]; then
+            echo "Exit Code: $exit_code" >> "$HISTPLUS_LOG_FILE"
+        fi
+        echo "---" >> "$HISTPLUS_LOG_FILE"
+        return
+    fi
+    
+    # Log the command and capture output (normal commands)
     echo "[$timestamp]" >> "$HISTPLUS_LOG_FILE"
     echo "Command: $cmd" >> "$HISTPLUS_LOG_FILE"
     echo "Output:" >> "$HISTPLUS_LOG_FILE"
@@ -737,6 +846,63 @@ export_to_csv() {
     print_success "CSV export completed: $output"
 }
 
+# Security audit command
+security_audit() {
+    print_info "Running security audit on history+ configuration..."
+    echo
+    
+    # Check configuration file
+    if [[ -f "$CONFIG_FILE" ]]; then
+        print_info "Configuration file: $CONFIG_FILE"
+        echo "Current exclusions: $(cat "$CONFIG_FILE" | grep -v '^#' | tr '\n' ',' | sed 's/,$//')"
+        echo
+    else
+        print_warning "No configuration file found"
+    fi
+    
+    # Check hardcoded security exclusions
+    print_info "Hardcoded security exclusions (never logged):"
+    echo "  $SECURITY_CRITICAL_COMMANDS"
+    echo
+    
+    # Check password input commands (logged but output excluded)
+    print_info "Smart password filtering commands (command + output logged, password prompts filtered):"
+    echo "  $PASSWORD_INPUT_COMMANDS"
+    echo
+    
+    # Run validation
+    validate_security_config
+    
+    # Check directory permissions
+    local dir_perms
+    dir_perms=$(stat -c "%a" "$CONFIG_DIR" 2>/dev/null || echo "unknown")
+    if [[ "$dir_perms" == "700" ]]; then
+        print_success "Configuration directory permissions: $dir_perms (secure)"
+    else
+        print_warning "Configuration directory permissions: $dir_perms (should be 700)"
+        print_info "Fix with: chmod 700 $CONFIG_DIR"
+    fi
+    
+    # Check for existing logs with potential sensitive data
+    if [[ -d "$LOG_DIR" ]]; then
+        local log_count
+        log_count=$(find "$LOG_DIR" -name "*.log" -type f | wc -l)
+        print_info "Found $log_count log files in $LOG_DIR"
+        
+        if [[ $log_count -gt 0 ]]; then
+            echo
+            print_info "Security recommendations:"
+            echo "  1. Regularly clean old logs: history+ cleanup --older-than 30d"
+            echo "  2. Review log permissions: ls -la $LOG_DIR"
+            echo "  3. sudo commands log the command but not password input"
+            echo "  4. Consider log encryption for sensitive environments"
+        fi
+    fi
+    
+    echo
+    print_success "Security audit completed"
+}
+
 # Main function
 main() {
     case "${1:-}" in
@@ -765,6 +931,9 @@ main() {
         export)
             shift  # Remove 'export' from arguments
             export_logs "$@"
+            ;;
+        security)
+            security_audit
             ;;
         help|--help|-h)
             show_usage
