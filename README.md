@@ -80,7 +80,7 @@ You can add or remove commands (comma-separated) as needed.
 
 ```bash
 # Clone the repository
-git clone https://github.com/vinothvbt/history-plus.git
+git clone https://github.com/vinothvbt/history+.git
 cd history-plus
 
 # Install for current user only (recommended)
