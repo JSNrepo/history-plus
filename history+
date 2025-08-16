@@ -83,7 +83,7 @@ Configuration:
   Config directory: $CONFIG_DIR
   Config file: $CONFIG_FILE
   
-For more information, visit: https://github.com/your-repo/history-plus
+For more information, visit: https://github.com/vinothvbt/history-plus
 EOF
 }
 
@@ -198,6 +198,16 @@ is_excluded_command() {
         fi
     done
     
+    # Check if this is a password input command - these should NOT be excluded here
+    # They should be handled by smart filtering instead
+    IFS=',' read -ra PASSWORD_CMDS <<< "$PASSWORD_INPUT_COMMANDS"
+    for password_cmd in "${PASSWORD_CMDS[@]}"; do
+        password_cmd=$(echo "$password_cmd" | tr -d ' ')
+        if [[ "$base_cmd" == "$password_cmd" ]]; then
+            return 1  # Don't exclude - let smart filtering handle it
+        fi
+    done
+    
     # Check commands with password flags
     if [[ "$cmd" =~ -p[[:space:]]|--password[[:space:]]|--pass[[:space:]]|--pwd[[:space:]]|--secret[[:space:]]|--token[[:space:]]|--key[[:space:]]|--auth[[:space:]] ]]; then
         return 0  # Exclude completely
@@ -207,7 +217,7 @@ is_excluded_command() {
     local excluded_commands
     excluded_commands=$(get_excluded_commands)
     while IFS= read -r excluded; do
-        if [[ -n "$excluded" && "$cmd" =~ ^$excluded ]]; then
+        if [[ -n "$excluded" && "$base_cmd" == "$excluded" ]]; then
             return 0
         fi
     done <<< "$excluded_commands"
@@ -295,6 +305,82 @@ EOF
 
 # Save original PS1
 HISTPLUS_ORIGINAL_PS1="$PS1"
+
+# Define security functions in the logging environment
+# Hardcoded security-critical commands that should never be logged
+readonly SECURITY_CRITICAL_COMMANDS="passwd,su,login,ssh-keygen"
+
+# Commands that should log the command but not capture interactive password input
+readonly PASSWORD_INPUT_COMMANDS="sudo,gpg,openssl"
+
+# Check if a command should be excluded
+is_excluded_command() {
+    local cmd="$1"
+    local base_cmd=$(echo "$cmd" | awk '{print $1}')
+    
+    # Always exclude history+ itself
+    if [[ "$cmd" == "history+" || "$cmd" =~ ^history\+.* ]]; then
+        return 0
+    fi
+    
+    # Check hardcoded security-critical commands (never logged at all)
+    IFS=',' read -ra CRITICAL_CMDS <<< "$SECURITY_CRITICAL_COMMANDS"
+    for critical_cmd in "${CRITICAL_CMDS[@]}"; do
+        critical_cmd=$(echo "$critical_cmd" | tr -d ' ')
+        if [[ "$base_cmd" == "$critical_cmd" ]]; then
+            return 0  # Exclude completely
+        fi
+    done
+    
+    # Check if this is a password input command - these should NOT be excluded here
+    # They should be handled by smart filtering instead
+    IFS=',' read -ra PASSWORD_CMDS <<< "$PASSWORD_INPUT_COMMANDS"
+    for password_cmd in "${PASSWORD_CMDS[@]}"; do
+        password_cmd=$(echo "$password_cmd" | tr -d ' ')
+        if [[ "$base_cmd" == "$password_cmd" ]]; then
+            return 1  # Don't exclude - let smart filtering handle it
+        fi
+    done
+    
+    # Check commands with password flags
+    if [[ "$cmd" =~ -p[[:space:]]|--password[[:space:]]|--pass[[:space:]]|--pwd[[:space:]]|--secret[[:space:]]|--token[[:space:]]|--key[[:space:]]|--auth[[:space:]] ]]; then
+        return 0  # Exclude completely
+    fi
+    
+    # Check user-configured exclusions from config file
+    if [[ -f "$HOME/.history_plus/config" ]]; then
+        local excluded_commands
+        if command -v tr >/dev/null 2>&1; then
+            excluded_commands=$(tr ',' '\n' < "$HOME/.history_plus/config" | tr -d ' ')
+        else
+            excluded_commands=$(cat "$HOME/.history_plus/config" | sed 's/,/\n/g' | sed 's/[[:space:]]//g')
+        fi
+        
+        while IFS= read -r excluded; do
+            if [[ -n "$excluded" && "$base_cmd" == "$excluded" ]]; then
+                return 0
+            fi
+        done <<< "$excluded_commands"
+    fi
+    
+    return 1  # Don't exclude
+}
+
+# Check if command should have limited output logging
+is_password_input_command() {
+    local cmd="$1"
+    local base_cmd=$(echo "$cmd" | awk '{print $1}')
+    
+    IFS=',' read -ra PASSWORD_CMDS <<< "$PASSWORD_INPUT_COMMANDS"
+    for password_cmd in "${PASSWORD_CMDS[@]}"; do
+        password_cmd=$(echo "$password_cmd" | tr -d ' ')
+        if [[ "$base_cmd" == "$password_cmd" ]]; then
+            return 0  # Limited logging
+        fi
+    done
+    
+    return 1  # Normal logging
+}
 
 # Set up command logging
 log_command() {
