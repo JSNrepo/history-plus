@@ -57,7 +57,7 @@ show_usage() {
 Usage: $SCRIPT_NAME <command>
 
 Commands:
-  start     Start logging session [--json] [--keywords file]
+  start     Start logging session [--name SESSION_NAME] [--json] [--keywords file]
   stop      Stop current logging session
   status    Show current session status
   tail      Live view of current log file [--json]
@@ -70,6 +70,7 @@ Commands:
 
 Examples:
   $SCRIPT_NAME start    # Begin logging commands and outputs
+  $SCRIPT_NAME start --name "pentest-session"  # Start with session name
   $SCRIPT_NAME start --json  # Log in JSON format for parsing
   $SCRIPT_NAME stop     # End current session
   $SCRIPT_NAME status   # Check if logging is active
@@ -165,9 +166,17 @@ get_timestamp() {
 
 # Get log filename for current session
 get_log_filename() {
-    local session_date
+    local session_date session_name
     session_date=$(date '+%Y-%m-%d_%H-%M-%S')
-    echo "$LOG_DIR/history_plus_${session_date}.log"
+    
+    # Check if a session name was provided
+    if [[ -n "${HISTPLUS_SESSION_NAME:-}" ]]; then
+        # Sanitize session name (replace spaces and special chars with underscores)
+        session_name=$(echo "$HISTPLUS_SESSION_NAME" | sed 's/[^a-zA-Z0-9_-]/_/g' | tr '[:upper:]' '[:lower:]')
+        echo "$LOG_DIR/history_plus_${session_date}_${session_name}.log"
+    else
+        echo "$LOG_DIR/history_plus_${session_date}.log"
+    fi
 }
 
 # Read excluded commands from config
@@ -259,6 +268,36 @@ get_current_log_file() {
 
 # Start logging session
 start_session() {
+    local session_name=""
+    
+    # Parse arguments for session name
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --name)
+                session_name="$2"
+                shift 2
+                ;;
+            --json)
+                # JSON support placeholder for future enhancement
+                shift
+                ;;
+            --keywords)
+                # Keywords support placeholder for future enhancement  
+                shift 2
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo "Use 'history+ help' for usage information"
+                return 1
+                ;;
+        esac
+    done
+    
+    # Set session name environment variable if provided
+    if [[ -n "$session_name" ]]; then
+        export HISTPLUS_SESSION_NAME="$session_name"
+    fi
+    
     if is_session_active; then
         local current_log
         current_log=$(get_current_log_file)
@@ -279,11 +318,15 @@ start_session() {
     log_file=$(get_log_filename)
     
     print_info "Starting history+ logging session..."
+    if [[ -n "$session_name" ]]; then
+        print_info "Session name: $session_name"
+    fi
     print_info "Log file: $log_file"
     
     # Create initial log entry
     cat >> "$log_file" << EOF
 === history+ session started at $(get_timestamp) ===
+Session Name: ${session_name:-"(unnamed)"}
 Shell: $SHELL
 User: $USER
 Working Directory: $PWD
@@ -567,11 +610,15 @@ list_sessions() {
         [[ ! -f "$log_file" ]] && continue
         count=$((count + 1))
         
-        local file_size start_time
+        local file_size start_time session_name
         file_size=$(du -h "$log_file" 2>/dev/null | cut -f1 || echo "?")
         start_time=$(head -1 "$log_file" 2>/dev/null | grep "session started at" | sed 's/.*started at //' | sed 's/ ===//' || echo "unknown")
         
+        # Extract session name from log file if present
+        session_name=$(grep "^Session Name:" "$log_file" 2>/dev/null | sed 's/Session Name: //' | sed 's/(unnamed)/unnamed/' || echo "unnamed")
+        
         echo "$count. $(basename "$log_file")"
+        echo "   Session: $session_name"
         echo "   Started: $start_time"
         echo "   Size: $file_size"
         echo "   Path: $log_file"
@@ -993,7 +1040,8 @@ security_audit() {
 main() {
     case "${1:-}" in
         start)
-            start_session
+            shift  # Remove 'start' from arguments
+            start_session "$@"
             ;;
         stop)
             stop_session
