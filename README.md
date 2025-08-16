@@ -33,6 +33,7 @@
 
 ### Core Features
 - Start/stop logging sessions with simple commands.
+- **Named Sessions:** Optional session naming for better organization and identification.
 - Timestamped logs saved in `~/.history_plus/`.
 - Smart exclusion and filtering for sensitive commands (customizable).
 - Handles shell exit cleanly (EXIT, INT, HUP traps).
@@ -97,12 +98,13 @@ make install                # System-wide
 ## Quick Start
 
 ```bash
-history+ start        # Begin logging
+history+ start                    # Begin logging
+history+ start --name "pentest"   # Begin logging with session name
 # ...run your commands...
-history+ stop         # End logging
-history+ status       # Show logging status and log paths
-history+ tail         # View latest entries live
-history+ list         # List all previous sessions
+history+ stop                     # End logging
+history+ status                   # Show logging status and log paths
+history+ tail                     # View latest entries live
+history+ list                     # List all previous sessions
 ```
 
 ---
@@ -122,6 +124,7 @@ Add or remove commands (comma-separated) as needed.
 ## Usage
 
 - **Start Logging:** `history+ start`
+- **Start Named Session:** `history+ start --name "session-name"`
 - **Stop Logging:** `history+ stop`
 - **Check Status:** `history+ status`
 - **Live View:** `history+ tail`
@@ -136,6 +139,14 @@ Add or remove commands (comma-separated) as needed.
 ---
 
 ## Advanced Usage
+
+### Named Sessions for Organization
+```bash
+history+ start --name "network-scan"     # Network reconnaissance session
+history+ start --name "web-pentest"      # Web application testing
+history+ start --name "privilege-esc"    # Privilege escalation testing
+history+ list                             # View all sessions with names
+```
 
 ### Automated Log Management (with crontab)
 ```bash
