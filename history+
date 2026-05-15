@@ -26,6 +26,7 @@ readonly SECURITY_CRITICAL_COMMANDS="passwd,su,login,ssh-keygen"
 
 # Commands that should log the command but not capture interactive password input
 readonly PASSWORD_INPUT_COMMANDS="sudo,gpg,openssl"
+readonly TUI_ERROR_KEYWORDS="error,failed,exception,denied,not found"
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -734,7 +735,9 @@ parse_log_for_tui() {
     local output_trimmed=""
     local output_lower=""
     local has_error="no"
-    local -a error_keywords=("error" "failed" "exception" "denied" "not found")
+    local -a error_keywords=()
+
+    IFS=',' read -ra error_keywords <<< "$TUI_ERROR_KEYWORDS"
 
     TUI_SESSION_NAME="unknown"
     TUI_SESSION_STARTED="unknown"
@@ -890,6 +893,9 @@ run_tui_viewer() {
     local metadata_text=""
     local status_text=""
     local entry_idx=0
+    local marker=" "
+    local output_pane_width=0
+    local metadata_pane_width=0
     local -a center_lines=()
     local -a metadata_lines=()
 
@@ -940,6 +946,8 @@ run_tui_viewer() {
         w1=$((cols / 3))
         w2=$((cols / 3))
         w3=$((cols - w1 - w2 - 2))
+        output_pane_width=$((w2 - 1))
+        metadata_pane_width=$((w3 - 1))
         sep1=$w1
         sep2=$((w1 + w2 + 1))
         content_rows=$((rows - 4))
@@ -981,7 +989,7 @@ run_tui_viewer() {
 
             for ((i = scroll_start; i < ${#TUI_FILTERED_INDICES[@]} && list_row < content_rows; i++)); do
                 entry_idx="${TUI_FILTERED_INDICES[$i]}"
-                local marker=" "
+                marker=" "
                 if (( i == selected_pos )); then
                     marker=">"
                 fi
@@ -997,7 +1005,7 @@ run_tui_viewer() {
             if [[ -z "$center_text" ]]; then
                 center_text="[no output captured]"
             fi
-            mapfile -t center_lines < <(printf '%s\n' "$center_text" | fold -s -w $((w2 - 1)))
+            mapfile -t center_lines < <(printf '%s\n' "$center_text" | fold -s -w "$output_pane_width")
 
             metadata_text="Command: ${TUI_ENTRY_COMMANDS[$selected_index]}
 Executed: ${TUI_ENTRY_TIMESTAMPS[$selected_index]}
@@ -1008,7 +1016,7 @@ Session: ${TUI_SESSION_NAME}
 Session Started: ${TUI_SESSION_STARTED}
 Session Ended: ${TUI_SESSION_ENDED:-running}
 Log Path: $selected_log"
-            mapfile -t metadata_lines < <(printf '%s\n' "$metadata_text" | fold -s -w $((w3 - 1)))
+            mapfile -t metadata_lines < <(printf '%s\n' "$metadata_text" | fold -s -w "$metadata_pane_width")
 
             for ((i = 0; i < content_rows && i < ${#center_lines[@]}; i++)); do
                 tput cup $((3 + i)) $((sep1 + 1))
