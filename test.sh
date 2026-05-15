@@ -133,6 +133,8 @@ EOF
 
     if echo "$smoke_output" | grep -q "Entries: 2" && \
        echo "$smoke_output" | grep -q "Session Name: test-session" && \
+       echo "$smoke_output" | grep -q "NonZeroExitEntries: 1" && \
+       echo "$smoke_output" | grep -q "ErrorEntries: 1" && \
        echo "$smoke_output" | grep -q "TUI smoke test: OK"; then
         print_success "TUI parser smoke mode works"
         rm -f "$tmp_log"
