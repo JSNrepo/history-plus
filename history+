@@ -728,8 +728,8 @@ parse_log_for_tui() {
     local current_output=""
     local current_exit_code=""
     local in_output=false
-    local i=0
-    local j=0
+    local entry_idx=0
+    local keyword_idx=0
     local entry_count=0
     local output_trimmed=""
     local output_lower=""
@@ -789,9 +789,9 @@ parse_log_for_tui() {
     fi
 
     entry_count=${#TUI_ENTRY_TIMESTAMPS[@]}
-    for ((i = 0; i < entry_count; i++)); do
-        if (( i + 1 < entry_count )); then
-            TUI_ENTRY_END_TIMES+=("${TUI_ENTRY_TIMESTAMPS[$((i + 1))]}")
+    for ((entry_idx = 0; entry_idx < entry_count; entry_idx++)); do
+        if (( entry_idx + 1 < entry_count )); then
+            TUI_ENTRY_END_TIMES+=("${TUI_ENTRY_TIMESTAMPS[$((entry_idx + 1))]}")
         elif [[ -n "$TUI_SESSION_ENDED" ]]; then
             TUI_ENTRY_END_TIMES+=("$TUI_SESSION_ENDED")
         else
@@ -799,12 +799,12 @@ parse_log_for_tui() {
         fi
 
         has_error="no"
-        if [[ -n "${TUI_ENTRY_EXIT_CODES[$i]}" && "${TUI_ENTRY_EXIT_CODES[$i]}" != "0" ]]; then
+        if [[ -n "${TUI_ENTRY_EXIT_CODES[$entry_idx]}" && "${TUI_ENTRY_EXIT_CODES[$entry_idx]}" != "0" ]]; then
             has_error="yes"
         else
-            output_lower="${TUI_ENTRY_OUTPUTS[$i],,}"
-            for ((j = 0; j < ${#error_keywords[@]}; j++)); do
-                if [[ "$output_lower" == *"${error_keywords[$j]}"* ]]; then
+            output_lower="${TUI_ENTRY_OUTPUTS[$entry_idx],,}"
+            for ((keyword_idx = 0; keyword_idx < ${#error_keywords[@]}; keyword_idx++)); do
+                if [[ "$output_lower" == *"${error_keywords[$keyword_idx]}"* ]]; then
                     has_error="yes"
                     break
                 fi
@@ -889,6 +889,7 @@ run_tui_viewer() {
     local center_text=""
     local metadata_text=""
     local status_text=""
+    local entry_idx=0
     local -a center_lines=()
     local -a metadata_lines=()
 
@@ -979,7 +980,6 @@ run_tui_viewer() {
             fi
 
             for ((i = scroll_start; i < ${#TUI_FILTERED_INDICES[@]} && list_row < content_rows; i++)); do
-                local entry_idx
                 entry_idx="${TUI_FILTERED_INDICES[$i]}"
                 local marker=" "
                 if (( i == selected_pos )); then

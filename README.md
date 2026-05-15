@@ -176,7 +176,7 @@ history+ tui /path/to/session.log
 The TUI layout:
 - **Left pane:** command history entries
 - **Center pane:** selected command output
-- **Right pane:** execution metadata (executed, stopped, exit code, errors, session details)
+- **Right pane:** execution metadata (start/end timestamps, exit code, errors, session details)
 
 Keybindings:
 - `↑/↓` or `k/j`: move selection
