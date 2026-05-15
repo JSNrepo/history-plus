@@ -45,9 +45,10 @@
 - **Export:** Convert logs to JSON/CSV for deeper analysis.
 - **Size Monitoring:** Warnings if logs exceed configured thresholds.
 - **Advanced Cleanup:** Filter and confirm deletions by age, size, etc.
+- **TUI Viewer:** Three-pane terminal viewer for history, output, and metadata.
 
 ### Built-in Commands
-- `history+ start` / `stop` / `status` / `tail` / `list`
+- `history+ start` / `stop` / `status` / `tail` / `tui` / `list`
 - `history+ rotate` / `cleanup [options]` / `export [options]`
 - `history+ security` (security audit of your config)
 
@@ -104,6 +105,7 @@ history+ start --name "pentest"   # Begin logging with session name
 history+ stop                     # End logging
 history+ status                   # Show logging status and log paths
 history+ tail                     # View latest entries live
+history+ tui                      # Open three-pane terminal viewer
 history+ list                     # List all previous sessions
 ```
 
@@ -128,6 +130,7 @@ Add or remove commands (comma-separated) as needed.
 - **Stop Logging:** `history+ stop`
 - **Check Status:** `history+ status`
 - **Live View:** `history+ tail`
+- **TUI View:** `history+ tui`
 - **List Sessions:** `history+ list`
 - **Rotate Logs:** `history+ rotate`
 - **Cleanup Old Logs:**  
@@ -163,6 +166,23 @@ history+ cleanup --larger-than 100M --dry-run
 history+ export --format json session.log | jq '.session.entries[].command'
 history+ export --format csv session.log
 ```
+
+### Three-Pane TUI Viewer
+```bash
+history+ tui
+history+ tui /path/to/session.log
+```
+
+The TUI layout:
+- **Left pane:** command history entries
+- **Center pane:** selected command output
+- **Right pane:** execution metadata (executed, stopped, exit code, errors, session details)
+
+Keybindings:
+- `↑/↓` or `k/j`: move selection
+- `/`: search command text
+- `r`: refresh (auto-refresh is enabled when viewing the active session log)
+- `q`: quit
 
 ### Log Rotation Strategies
 ```bash
@@ -216,6 +236,15 @@ Starting Nmap 7.80 ( https://nmap.org )
 - **Run tests:** `make test`
 - **Install for dev:** `make install-user`
 - **Lint:** `make lint`
+
+---
+
+## Troubleshooting
+
+- **TUI says terminal is too small:** Use a terminal at least `90x16`.
+- **TUI requires interactive terminal:** Run `history+ tui` directly in a terminal (not in a non-TTY pipe).
+- **Need a quick non-interactive parser check:**  
+  `history+ tui --smoke-test /path/to/session.log`
 
 ---
 

@@ -61,6 +61,7 @@ Commands:
   stop      Stop current logging session
   status    Show current session status
   tail      Live view of current log file [--json]
+  tui       Interactive three-pane TUI log viewer
   list      List all previous logging sessions
   rotate    Rotate current log (start new session)
   cleanup   Clean up old logs (with size/age filters)
@@ -75,6 +76,7 @@ Examples:
   $SCRIPT_NAME stop     # End current session
   $SCRIPT_NAME status   # Check if logging is active
   $SCRIPT_NAME tail     # Watch log file in real-time
+  $SCRIPT_NAME tui      # Browse history, output, and metadata in TUI
   $SCRIPT_NAME list     # Show all previous sessions
   $SCRIPT_NAME rotate   # Start new log file (auto-rotate)
   $SCRIPT_NAME cleanup --older-than 30d  # Remove logs older than 30 days
@@ -634,6 +636,491 @@ list_sessions() {
     fi
 }
 
+# Show TUI command help
+show_tui_help() {
+    cat << EOF
+Usage: $SCRIPT_NAME tui [OPTIONS] [LOG_FILE]
+
+Interactive three-pane terminal UI:
+  Left pane   - command history entries
+  Center pane - selected command output
+  Right pane  - execution metadata
+
+Options:
+  --help        Show this help
+  --smoke-test  Non-interactive parser smoke test
+
+Keybindings:
+  Up/Down (or k/j) - Move selection
+  /               - Search by command text
+  r               - Refresh (auto-refresh on active session)
+  q               - Quit
+EOF
+}
+
+# Collect available log files (active first, then recent archived)
+collect_tui_log_files() {
+    local active_log=""
+    local file=""
+    local -a files=()
+
+    if is_session_active; then
+        active_log=$(get_current_log_file || true)
+        if [[ -n "$active_log" && -f "$active_log" ]]; then
+            files+=("$active_log")
+        fi
+    fi
+
+    if [[ -d "$LOG_DIR" ]]; then
+        while IFS= read -r file; do
+            [[ -z "$file" || ! -f "$file" ]] && continue
+            if [[ "$file" != "$active_log" ]]; then
+                files+=("$file")
+            fi
+        done < <(ls -1t "$LOG_DIR"/history_plus_*.log 2>/dev/null || true)
+    fi
+
+    printf '%s\n' "${files[@]}"
+}
+
+# Select a log file for TUI mode
+select_tui_log_file() {
+    local non_interactive="${1:-false}"
+    local -a files=()
+    local index=""
+    local i=1
+
+    mapfile -t files < <(collect_tui_log_files)
+
+    if [[ ${#files[@]} -eq 0 || -z "${files[0]:-}" ]]; then
+        print_error "No log files available in $LOG_DIR"
+        print_info "Start a session with '$SCRIPT_NAME start' first"
+        return 1
+    fi
+
+    if [[ ${#files[@]} -eq 1 || "$non_interactive" == "true" ]]; then
+        echo "${files[0]}"
+        return 0
+    fi
+
+    echo "Select a log file to open in TUI:"
+    for file in "${files[@]}"; do
+        echo "  $i) $file"
+        i=$((i + 1))
+    done
+    echo
+    read -r -p "Enter number [1-${#files[@]}]: " index
+
+    if [[ ! "$index" =~ ^[0-9]+$ ]] || [[ "$index" -lt 1 || "$index" -gt ${#files[@]} ]]; then
+        print_error "Invalid selection"
+        return 1
+    fi
+
+    echo "${files[$((index - 1))]}"
+}
+
+# Parse log file into TUI entry arrays
+parse_log_for_tui() {
+    local input_file="$1"
+    local line=""
+    local current_timestamp=""
+    local current_command=""
+    local current_output=""
+    local current_exit_code=""
+    local in_output=false
+    local i=0
+    local entry_count=0
+    local output_trimmed=""
+    local has_error="no"
+
+    TUI_SESSION_NAME="unknown"
+    TUI_SESSION_STARTED="unknown"
+    TUI_SESSION_ENDED=""
+    TUI_ENTRY_TIMESTAMPS=()
+    TUI_ENTRY_COMMANDS=()
+    TUI_ENTRY_OUTPUTS=()
+    TUI_ENTRY_EXIT_CODES=()
+    TUI_ENTRY_END_TIMES=()
+    TUI_ENTRY_HAS_ERRORS=()
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^===\ history\+\ session\ started\ at\ (.*)\ ===$ ]]; then
+            TUI_SESSION_STARTED="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^===\ history\+\ session\ ended\ at\ (.*)\ ===$ ]]; then
+            TUI_SESSION_ENDED="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^Session\ Name:\ (.*)$ ]]; then
+            TUI_SESSION_NAME="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^\[([0-9-]+\ [0-9:]+)\]$ ]]; then
+            if [[ -n "$current_timestamp" ]]; then
+                output_trimmed="${current_output%$'\n'}"
+                TUI_ENTRY_TIMESTAMPS+=("$current_timestamp")
+                TUI_ENTRY_COMMANDS+=("$current_command")
+                TUI_ENTRY_OUTPUTS+=("$output_trimmed")
+                TUI_ENTRY_EXIT_CODES+=("$current_exit_code")
+            fi
+
+            current_timestamp="${BASH_REMATCH[1]}"
+            current_command=""
+            current_output=""
+            current_exit_code=""
+            in_output=false
+        elif [[ "$line" =~ ^Command:\ (.*)$ ]]; then
+            current_command="${BASH_REMATCH[1]}"
+        elif [[ "$line" == "Output:" ]]; then
+            in_output=true
+        elif [[ "$line" =~ ^Exit\ Code:\ ([0-9]+)$ ]]; then
+            current_exit_code="${BASH_REMATCH[1]}"
+        elif [[ "$line" == "---" ]]; then
+            in_output=false
+        elif $in_output; then
+            current_output+="$line"$'\n'
+        fi
+    done < "$input_file"
+
+    if [[ -n "$current_timestamp" ]]; then
+        output_trimmed="${current_output%$'\n'}"
+        TUI_ENTRY_TIMESTAMPS+=("$current_timestamp")
+        TUI_ENTRY_COMMANDS+=("$current_command")
+        TUI_ENTRY_OUTPUTS+=("$output_trimmed")
+        TUI_ENTRY_EXIT_CODES+=("$current_exit_code")
+    fi
+
+    entry_count=${#TUI_ENTRY_TIMESTAMPS[@]}
+    for ((i = 0; i < entry_count; i++)); do
+        if (( i + 1 < entry_count )); then
+            TUI_ENTRY_END_TIMES+=("${TUI_ENTRY_TIMESTAMPS[$((i + 1))]}")
+        elif [[ -n "$TUI_SESSION_ENDED" ]]; then
+            TUI_ENTRY_END_TIMES+=("$TUI_SESSION_ENDED")
+        else
+            TUI_ENTRY_END_TIMES+=("running/unknown")
+        fi
+
+        has_error="no"
+        if [[ -n "${TUI_ENTRY_EXIT_CODES[$i]}" && "${TUI_ENTRY_EXIT_CODES[$i]}" != "0" ]]; then
+            has_error="yes"
+        elif printf '%s\n' "${TUI_ENTRY_OUTPUTS[$i]}" | grep -Eqi 'error|failed|exception|denied|not found'; then
+            has_error="yes"
+        fi
+        TUI_ENTRY_HAS_ERRORS+=("$has_error")
+    done
+}
+
+# Apply command-text filter to parsed entries
+apply_tui_filter() {
+    local query="${1:-}"
+    local i=0
+    local cmd_lower=""
+    local query_lower=""
+
+    TUI_FILTER_QUERY="$query"
+    TUI_FILTERED_INDICES=()
+
+    query_lower="${query,,}"
+    for ((i = 0; i < ${#TUI_ENTRY_TIMESTAMPS[@]}; i++)); do
+        if [[ -z "$query_lower" ]]; then
+            TUI_FILTERED_INDICES+=("$i")
+        else
+            cmd_lower="${TUI_ENTRY_COMMANDS[$i],,}"
+            if [[ "$cmd_lower" == *"$query_lower"* ]]; then
+                TUI_FILTERED_INDICES+=("$i")
+            fi
+        fi
+    done
+}
+
+# Truncate line to fit pane width
+tui_truncate_line() {
+    local text="$1"
+    local width="$2"
+    local max_prefix=0
+
+    if (( width <= 0 )); then
+        echo ""
+        return
+    fi
+
+    if (( ${#text} <= width )); then
+        echo "$text"
+        return
+    fi
+
+    if (( width <= 3 )); then
+        echo "${text:0:width}"
+        return
+    fi
+
+    max_prefix=$((width - 3))
+    echo "${text:0:max_prefix}..."
+}
+
+# Draw and run interactive TUI
+run_tui_viewer() {
+    local selected_log="$1"
+    local active_log=""
+    local live_mode=false
+    local rows=0
+    local cols=0
+    local w1=0
+    local w2=0
+    local w3=0
+    local sep1=0
+    local sep2=0
+    local content_rows=0
+    local list_row=0
+    local row=0
+    local i=0
+    local selected_pos=0
+    local scroll_start=0
+    local selected_index=0
+    local header=""
+    local key=""
+    local esc_rest=""
+    local query=""
+    local left_text=""
+    local center_text=""
+    local metadata_text=""
+    local status_text=""
+    local -a center_lines=()
+    local -a metadata_lines=()
+
+    active_log=$(get_current_log_file || true)
+    if [[ -n "$active_log" && "$selected_log" == "$active_log" ]]; then
+        live_mode=true
+    fi
+
+    parse_log_for_tui "$selected_log"
+    apply_tui_filter ""
+
+    if ! command -v tput >/dev/null 2>&1; then
+        print_error "tput is required for TUI mode"
+        return 1
+    fi
+
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        print_error "TUI mode requires an interactive terminal"
+        return 1
+    fi
+
+    tput civis
+    trap 'tput cnorm; stty echo; clear' RETURN
+
+    while true; do
+        rows=$(tput lines)
+        cols=$(tput cols)
+
+        if (( rows < 16 || cols < 90 )); then
+            clear
+            print_error "Terminal too small for TUI (minimum: 90x16)"
+            print_info "Resize terminal and run '$SCRIPT_NAME tui' again"
+            return 1
+        fi
+
+        if (( selected_pos < 0 )); then
+            selected_pos=0
+        fi
+        if (( selected_pos >= ${#TUI_FILTERED_INDICES[@]} )) && (( ${#TUI_FILTERED_INDICES[@]} > 0 )); then
+            selected_pos=$((${#TUI_FILTERED_INDICES[@]} - 1))
+        fi
+        if (( selected_pos < scroll_start )); then
+            scroll_start=$selected_pos
+        fi
+
+        w1=$((cols / 3))
+        w2=$((cols / 3))
+        w3=$((cols - w1 - w2 - 2))
+        sep1=$w1
+        sep2=$((w1 + w2 + 1))
+        content_rows=$((rows - 4))
+
+        clear
+
+        header="history+ TUI | file: $(basename "$selected_log") | entries: ${#TUI_ENTRY_TIMESTAMPS[@]} | filter: ${TUI_FILTER_QUERY:-none}"
+        tput cup 0 0
+        printf "%s" "$(tui_truncate_line "$header" "$cols")"
+
+        tput cup 1 0
+        printf "%s" "$(printf '%*s' "$cols" '' | tr ' ' '=')"
+
+        tput cup 2 0
+        printf "%s" "$(tui_truncate_line "History" "$w1")"
+        tput cup 2 $((sep1 + 1))
+        printf "%s" "$(tui_truncate_line "Output" "$w2")"
+        tput cup 2 $((sep2 + 1))
+        printf "%s" "$(tui_truncate_line "Metadata" "$w3")"
+
+        for ((row = 2; row < rows - 1; row++)); do
+            tput cup "$row" "$sep1"
+            printf "|"
+            tput cup "$row" "$sep2"
+            printf "|"
+        done
+
+        if (( ${#TUI_FILTERED_INDICES[@]} == 0 )); then
+            tput cup 3 0
+            printf "%s" "$(tui_truncate_line "No entries match current filter." "$w1")"
+            selected_index=-1
+        else
+            selected_index="${TUI_FILTERED_INDICES[$selected_pos]}"
+            list_row=0
+
+            if (( selected_pos >= scroll_start + content_rows )); then
+                scroll_start=$((selected_pos - content_rows + 1))
+            fi
+
+            for ((i = scroll_start; i < ${#TUI_FILTERED_INDICES[@]} && list_row < content_rows; i++)); do
+                local entry_idx
+                entry_idx="${TUI_FILTERED_INDICES[$i]}"
+                local marker=" "
+                if (( i == selected_pos )); then
+                    marker=">"
+                fi
+                left_text="$marker ${TUI_ENTRY_TIMESTAMPS[$entry_idx]} ${TUI_ENTRY_COMMANDS[$entry_idx]}"
+                tput cup $((3 + list_row)) 0
+                printf "%s" "$(tui_truncate_line "$left_text" "$w1")"
+                list_row=$((list_row + 1))
+            done
+        fi
+
+        if (( selected_index >= 0 )); then
+            center_text="${TUI_ENTRY_OUTPUTS[$selected_index]}"
+            if [[ -z "$center_text" ]]; then
+                center_text="[no output captured]"
+            fi
+            mapfile -t center_lines < <(printf '%s\n' "$center_text" | fold -s -w $((w2 - 1)))
+
+            metadata_text="Command: ${TUI_ENTRY_COMMANDS[$selected_index]}
+Executed: ${TUI_ENTRY_TIMESTAMPS[$selected_index]}
+Stopped: ${TUI_ENTRY_END_TIMES[$selected_index]}
+Exit Code: ${TUI_ENTRY_EXIT_CODES[$selected_index]:-0}
+Errors: ${TUI_ENTRY_HAS_ERRORS[$selected_index]}
+Session: ${TUI_SESSION_NAME}
+Session Started: ${TUI_SESSION_STARTED}
+Session Ended: ${TUI_SESSION_ENDED:-running}
+Log Path: $selected_log"
+            mapfile -t metadata_lines < <(printf '%s\n' "$metadata_text" | fold -s -w $((w3 - 1)))
+
+            for ((i = 0; i < content_rows && i < ${#center_lines[@]}; i++)); do
+                tput cup $((3 + i)) $((sep1 + 1))
+                printf "%s" "$(tui_truncate_line "${center_lines[$i]}" "$w2")"
+            done
+
+            for ((i = 0; i < content_rows && i < ${#metadata_lines[@]}; i++)); do
+                tput cup $((3 + i)) $((sep2 + 1))
+                printf "%s" "$(tui_truncate_line "${metadata_lines[$i]}" "$w3")"
+            done
+        fi
+
+        status_text="Keys: ↑/↓ or k/j move | / search | r refresh | q quit"
+        if [[ "$live_mode" == "true" ]]; then
+            status_text+=" | live refresh: on"
+        fi
+        tput cup $((rows - 1)) 0
+        printf "%s" "$(tui_truncate_line "$status_text" "$cols")"
+
+        key=""
+        if [[ "$live_mode" == "true" ]]; then
+            if ! read -rsn1 -t 1 key; then
+                parse_log_for_tui "$selected_log"
+                apply_tui_filter "${TUI_FILTER_QUERY:-}"
+                continue
+            fi
+        else
+            read -rsn1 key
+        fi
+
+        if [[ "$key" == $'\x1b' ]]; then
+            esc_rest=""
+            read -rsn2 -t 0.01 esc_rest || true
+            key+="$esc_rest"
+        fi
+
+        case "$key" in
+            q|Q)
+                break
+                ;;
+            $'\x1b[A'|k|K)
+                if (( selected_pos > 0 )); then
+                    selected_pos=$((selected_pos - 1))
+                fi
+                ;;
+            $'\x1b[B'|j|J)
+                if (( selected_pos + 1 < ${#TUI_FILTERED_INDICES[@]} )); then
+                    selected_pos=$((selected_pos + 1))
+                fi
+                ;;
+            r|R)
+                parse_log_for_tui "$selected_log"
+                apply_tui_filter "${TUI_FILTER_QUERY:-}"
+                ;;
+            /)
+                tput cup $((rows - 1)) 0
+                printf "%s" "$(printf '%*s' "$cols" '')"
+                tput cup $((rows - 1)) 0
+                printf "Search: "
+                stty echo
+                read -r query
+                stty -echo
+                apply_tui_filter "$query"
+                selected_pos=0
+                scroll_start=0
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+# TUI command entry point
+tui_command() {
+    local smoke_test=false
+    local log_file=""
+    local selected_log=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                show_tui_help
+                return 0
+                ;;
+            --smoke-test)
+                smoke_test=true
+                shift
+                ;;
+            *)
+                if [[ -z "$log_file" ]]; then
+                    log_file="$1"
+                    shift
+                else
+                    print_error "Unknown option or extra argument: $1"
+                    return 1
+                fi
+                ;;
+        esac
+    done
+
+    if [[ -n "$log_file" ]]; then
+        if [[ ! -f "$log_file" ]]; then
+            print_error "Log file not found: $log_file"
+            return 1
+        fi
+        selected_log="$log_file"
+    else
+        selected_log=$(select_tui_log_file "$smoke_test") || return 1
+    fi
+
+    parse_log_for_tui "$selected_log"
+
+    if [[ "$smoke_test" == "true" ]]; then
+        echo "TUI smoke test: OK"
+        echo "Log File: $selected_log"
+        echo "Entries: ${#TUI_ENTRY_TIMESTAMPS[@]}"
+        echo "Session Name: ${TUI_SESSION_NAME}"
+        return 0
+    fi
+
+    run_tui_viewer "$selected_log"
+}
+
 # Rotate current log (start new session file)
 rotate_log() {
     if ! is_session_active; then
@@ -1051,6 +1538,10 @@ main() {
             ;;
         tail)
             tail_log
+            ;;
+        tui)
+            shift  # Remove 'tui' from arguments
+            tui_command "$@"
             ;;
         list)
             list_sessions
