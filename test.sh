@@ -49,6 +49,19 @@ test_help_command() {
     fi
 }
 
+# Test TUI help command
+test_tui_help_command() {
+    print_info "Testing TUI help command"
+    
+    if ./history+ tui --help >/dev/null 2>&1; then
+        print_success "TUI help command works"
+        return 0
+    else
+        print_error "TUI help command failed"
+        return 1
+    fi
+}
+
 # Test status command (should show no active session)
 test_status_command() {
     print_info "Testing status command"
@@ -87,6 +100,48 @@ test_config_creation() {
         return 0
     else
         print_error "Configuration directory or config file missing"
+        return 1
+    fi
+}
+
+# Test TUI parser smoke mode with sample log
+test_tui_smoke_parser() {
+    print_info "Testing TUI parser smoke mode"
+
+    local tmp_log
+    local smoke_output
+    tmp_log=$(mktemp)
+
+    cat > "$tmp_log" << 'EOF'
+=== history+ session started at 2026-01-01 12:00:00 ===
+Session Name: test-session
+[2026-01-01 12:00:01]
+Command: echo hello
+Output:
+hello
+---
+[2026-01-01 12:00:03]
+Command: ls /not-found
+Output:
+ls: cannot access '/not-found': No such file or directory
+Exit Code: 2
+---
+=== history+ session ended at 2026-01-01 12:00:05 ===
+EOF
+
+    smoke_output=$(./history+ tui --smoke-test "$tmp_log" 2>/dev/null || true)
+
+    if echo "$smoke_output" | grep -q "Entries: 2" && \
+       echo "$smoke_output" | grep -q "Session Name: test-session" && \
+       echo "$smoke_output" | grep -q "NonZeroExitEntries: 1" && \
+       echo "$smoke_output" | grep -q "ErrorEntries: 1" && \
+       echo "$smoke_output" | grep -q "TUI smoke test: OK"; then
+        print_success "TUI parser smoke mode works"
+        rm -f "$tmp_log"
+        return 0
+    else
+        print_error "TUI parser smoke mode failed"
+        rm -f "$tmp_log"
         return 1
     fi
 }
@@ -148,9 +203,11 @@ run_tests() {
     local tests=(
         "test_script_exists"
         "test_help_command" 
+        "test_tui_help_command"
         "test_status_command"
         "test_invalid_command"
         "test_config_creation"
+        "test_tui_smoke_parser"
         "test_list_command"
         "test_security_audit"
         "test_shellcheck"
