@@ -731,6 +731,7 @@ parse_log_for_tui() {
     local i=0
     local entry_count=0
     local output_trimmed=""
+    local output_lower=""
     local has_error="no"
 
     TUI_SESSION_NAME="unknown"
@@ -798,8 +799,11 @@ parse_log_for_tui() {
         has_error="no"
         if [[ -n "${TUI_ENTRY_EXIT_CODES[$i]}" && "${TUI_ENTRY_EXIT_CODES[$i]}" != "0" ]]; then
             has_error="yes"
-        elif printf '%s\n' "${TUI_ENTRY_OUTPUTS[$i]}" | grep -Eqi 'error|failed|exception|denied|not found'; then
-            has_error="yes"
+        else
+            output_lower="${TUI_ENTRY_OUTPUTS[$i],,}"
+            if [[ "$output_lower" == *"error"* || "$output_lower" == *"failed"* || "$output_lower" == *"exception"* || "$output_lower" == *"denied"* || "$output_lower" == *"not found"* ]]; then
+                has_error="yes"
+            fi
         fi
         TUI_ENTRY_HAS_ERRORS+=("$has_error")
     done

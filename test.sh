@@ -109,6 +109,7 @@ test_tui_smoke_parser() {
     print_info "Testing TUI parser smoke mode"
 
     local tmp_log
+    local smoke_output
     tmp_log=$(mktemp)
 
     cat > "$tmp_log" << 'EOF'
@@ -128,7 +129,11 @@ Exit Code: 2
 === history+ session ended at 2026-01-01 12:00:05 ===
 EOF
 
-    if ./history+ tui --smoke-test "$tmp_log" | grep -q "Entries: 2"; then
+    smoke_output=$(./history+ tui --smoke-test "$tmp_log" 2>/dev/null || true)
+
+    if echo "$smoke_output" | grep -q "Entries: 2" && \
+       echo "$smoke_output" | grep -q "Session Name: test-session" && \
+       echo "$smoke_output" | grep -q "TUI smoke test: OK"; then
         print_success "TUI parser smoke mode works"
         rm -f "$tmp_log"
         return 0
